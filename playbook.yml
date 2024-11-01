@@ -174,3 +174,47 @@
     - name: Display sysLocation
       debug:
         msg: "The sysLocation is: {{ sysLocation_result.stdout }}"
+
+- name: WALK tcpConnLocalPort and udpLocalPort
+  hosts: managers
+  become: false
+  gather_facts: false # Skip gathering facts for this play
+  tags: snmp_walk_request # Tag this play
+  tasks:
+    - name: Walk tcpConnLocalPort using snmpwalk
+      shell: snmpwalk -v2c -c public {{ hostvars['agent']['ansible_host'] }} tcpConnLocalPort
+      register: tcpConnLocalPort_result
+
+    - name: Walk udpLocalPort using snmpwalk
+      shell: snmpwalk -v2c -c public {{ hostvars['agent']['ansible_host'] }} udpLocalPort
+      register: udpLocalPort_result
+
+    - name: Display tcpConnLocalPort
+      debug:
+        msg: "The tcpConnLocalPort is: {{ tcpConnLocalPort_result.stdout }}"
+
+    - name: Display udpLocalPort
+      debug:
+        msg: "The udpLocalPort is: {{ udpLocalPort_result.stdout }}"
+
+- name: GET sysName
+  hosts: managers
+  become: false
+  gather_facts: false # Skip gathering facts for this play
+  tags: sw_center # Tag this play
+  tasks:
+    - name: Get sysName from sw_center using snmpget
+      command: snmpget -v2c -c public {{ hostvars['sw_center']['ansible_host'] }} SNMPv2-MIB::sysName.0
+      register: sysName_result
+
+    - name: Get sysDescr from sw_center using snmpget
+      command: snmpget -v2c -c public {{ hostvars['sw_center']['ansible_host'] }} SNMPv2-MIB::sysDescr.0
+      register: sysDescr_result
+
+    - name: Display sysName
+      debug:
+        msg: "The sysName is: {{ sysName_result.stdout }}"
+
+    - name: Display sysDescr
+      debug:
+        msg: "The sysDescr is: {{ sysDescr_result.stdout }}"
