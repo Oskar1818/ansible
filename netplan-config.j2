@@ -1,0 +1,20 @@
+network:
+  version: 2
+  ethernets:
+    ens160:
+      dhcp4: false
+      addresses:
+        - {{ hostvars[inventory_hostname]['ip_address'] }}/24
+      nameservers:
+        addresses:
+          - {{ hostvars[inventory_hostname]['nameserver'] }}
+      routes:
+        - to: default
+          via: 172.20.0.254
+    ens192:
+      dhcp4: false
+      addresses:
+        - {{ hostvars[inventory_hostname]['secondary_ip_address'] }}/24
+      routes:
+        - to: 192.168.152.0/22
+          via: 192.168.151.254

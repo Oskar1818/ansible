@@ -1,0 +1,176 @@
+---
+- name: Setup
+  hosts: all
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: setup # Tag this play
+
+  tasks:
+    - name: Update system
+      apt:
+        update_cache: yes
+        upgrade: yes
+
+    - name: Set timezone to Europe/Stockholm
+      timezone:
+        name: Europe/Stockholm
+
+- name: Configure netplan on manager
+  hosts: managers
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: configure_netplan_manager # Tag this play
+  tasks:
+    - name: Configure netplan
+      template:
+        src: netplan-config.j2
+        dest: /etc/netplan/50-cloud-init.yaml
+
+    - name: Apply netplan configuration
+      command: netplan apply
+
+- name: Configure netplan on agent
+  hosts: agents
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: configure_netplan_agent # Tag this play
+  tasks:
+    - name: Configure netplan
+      template:
+        src: netplan-config.j2
+        dest: /etc/netplan/50-cloud-init.yaml
+
+    - name: Apply netplan configuration
+      command: netplan apply
+
+- name: Install and configure manager
+  hosts: managers
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: install_configure_manager # Tag this play
+  tasks:
+    - name: Install necessary packages
+      apt:
+        name:
+          - snmp
+          - snmp-mibs-downloader
+          - libsnmp-dev
+        state: present
+
+    - name: Comment out 'mibs :' in snmp.conf
+      lineinfile:
+        path: /etc/snmp/snmp.conf
+        regexp: "^mibs :"
+        line: "#mibs :"
+        state: present
+        insertafter: "^# loading them" # Change this to the line you want to insert after
+
+- name: Install and configure agent
+  hosts: agents
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: install_agent # Tag this play
+  tasks:
+    - name: Install necessary packages
+      apt:
+        name:
+          - snmpd
+          - libsnmp-dev
+        state: present
+
+    - name: edit agentaddress /etc/snmp/snmpd.conf
+      lineinfile:
+        path: /etc/snmp/snmpd.conf
+        regexp: "^agentaddress"
+        line: "agentaddress udp:161"
+
+    - name: edit communities /etc/snmp/snmpd.conf
+      blockinfile:
+        path: /etc/snmp/snmpd.conf
+        insertafter: "^#   arguments:"
+        block: |
+          rocommunity public 172.20.0.0/24
+          rocommunity public localhost
+          rwcommunity private 172.20.0.0/24
+          rwcommunity private localhost
+
+    - name: uncomment sysContact /etc/snmp/snmpd.conf
+      lineinfile:
+        path: /etc/snmp/snmpd.conf
+        regexp: "^sysContact"
+        line: "#sysContact"
+        state: absent
+
+    - name: uncomment sysLocation /etc/snmp/snmpd.conf
+      lineinfile:
+        path: /etc/snmp/snmpd.conf
+        regexp: "^sysLocation"
+        line: "#sysLocation"
+        state: absent
+
+    - name: Restart snmpd service
+      systemd:
+        name: snmpd
+        state: restarted
+
+- name: GET sysName
+  hosts: managers
+  become: false
+  gather_facts: false # Skip gathering facts for this play
+  tags: snmp_get_request # Tag this play
+  tasks:
+    - name: Get sysName from agent using snmpget
+      command: snmpget -v2c -c public {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysName.0
+      register: snmp_result
+
+    - name: Display sysName
+      debug:
+        msg: "The sysName is: {{ snmp_result.stdout }}"
+
+- name: Count MIBs
+  hosts: managers
+  become: false
+  gather_facts: false # Skip gathering facts for this play
+  tags: snmp_walk_request # Tag this play
+  tasks:
+    - name: Get number of mibs in root using snmpwalk
+      shell: snmpwalk -v2c -c public {{ hostvars['agent']['ansible_host'] }} . | wc -l
+      register: number_of_mibs
+
+    - name: Display number of MIBs
+      debug:
+        msg: "The number of MIBs in root is: {{ number_of_mibs.stdout }}"
+
+- name: SET sysContact and sysLocation
+  hosts: managers
+  become: false
+  gather_facts: false # Skip gathering facts for this play
+  tags: snmp_set_request # Tag this play
+  tasks:
+    - name: Set sysContact on agent using snmpset
+      shell: snmpset -v2c -c private {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysContact.0 s "sysContact set by Ansible"
+
+    - name: Set sysLocation on agent using snmpset
+      shell: snmpset -v2c -c private {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysLocation.0 s "sysLocation set by Ansible"
+
+- name: GET sysContact and sysLocation
+  hosts: managers
+  become: false
+  gather_facts: false # Skip gathering facts for this play
+  tags: snmp_get_request # Tag this play
+  tasks:
+    - name: Get sysContact from agent using snmpget
+      shell: snmpget -v2c -c public {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysContact.0
+      register: sysContact_result
+
+    - name: Get sysLocation from agent using snmpget
+      shell: snmpget -v2c -c public {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysLocation.0
+      register: sysLocation_result
+
+    - name: Display sysContact
+      debug:
+        msg: "The sysContact is: {{ sysContact_result.stdout }}"
+
+    - name: Display sysLocation
+      debug:
+        msg: "The sysLocation is: {{ sysLocation_result.stdout }}"
