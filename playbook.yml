@@ -3,7 +3,7 @@
   hosts: all
   become: true
   gather_facts: false # Skip gathering facts for this play
-  tags: setup # Tag this play
+  tags: "1"
 
   tasks:
     - name: Update system
@@ -16,10 +16,10 @@
         name: Europe/Stockholm
 
 - name: Configure netplan on manager
-  hosts: managers
+  hosts: manager
   become: true
   gather_facts: false # Skip gathering facts for this play
-  tags: configure_netplan_manager # Tag this play
+  tags: "2"
   tasks:
     - name: Configure netplan
       template:
@@ -30,10 +30,10 @@
       command: netplan apply
 
 - name: Configure netplan on agent
-  hosts: agents
+  hosts: agent
   become: true
   gather_facts: false # Skip gathering facts for this play
-  tags: configure_netplan_agent # Tag this play
+  tags: "3"
   tasks:
     - name: Configure netplan
       template:
@@ -44,10 +44,10 @@
       command: netplan apply
 
 - name: Install and configure manager
-  hosts: managers
+  hosts: manager
   become: true
   gather_facts: false # Skip gathering facts for this play
-  tags: install_configure_manager # Tag this play
+  tags: "4"
   tasks:
     - name: Install necessary packages
       apt:
@@ -66,10 +66,10 @@
         insertafter: "^# loading them" # Change this to the line you want to insert after
 
 - name: Install and configure agent
-  hosts: agents
+  hosts: agent
   become: true
   gather_facts: false # Skip gathering facts for this play
-  tags: install_agent # Tag this play
+  tags: "5"
   tasks:
     - name: Install necessary packages
       apt:
@@ -114,10 +114,10 @@
         state: restarted
 
 - name: GET sysName
-  hosts: managers
+  hosts: manager
   become: false
   gather_facts: false # Skip gathering facts for this play
-  tags: snmp_get_request # Tag this play
+  tags: "6"
   tasks:
     - name: Get sysName from agent using snmpget
       command: snmpget -v2c -c public {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysName.0
@@ -128,10 +128,10 @@
         msg: "The sysName is: {{ snmp_result.stdout }}"
 
 - name: Count MIBs
-  hosts: managers
+  hosts: manager
   become: false
   gather_facts: false # Skip gathering facts for this play
-  tags: snmp_walk_request # Tag this play
+  tags: "7"
   tasks:
     - name: Get number of mibs in root using snmpwalk
       shell: snmpwalk -v2c -c public {{ hostvars['agent']['ansible_host'] }} . | wc -l
@@ -142,10 +142,10 @@
         msg: "The number of MIBs in root is: {{ number_of_mibs.stdout }}"
 
 - name: SET sysContact and sysLocation
-  hosts: managers
+  hosts: manager
   become: false
   gather_facts: false # Skip gathering facts for this play
-  tags: snmp_set_request # Tag this play
+  tags: "8"
   tasks:
     - name: Set sysContact on agent using snmpset
       shell: snmpset -v2c -c private {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysContact.0 s "sysContact set by Ansible"
@@ -154,10 +154,10 @@
       shell: snmpset -v2c -c private {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysLocation.0 s "sysLocation set by Ansible"
 
 - name: GET sysContact and sysLocation
-  hosts: managers
+  hosts: manager
   become: false
   gather_facts: false # Skip gathering facts for this play
-  tags: snmp_get_request # Tag this play
+  tags: "9"
   tasks:
     - name: Get sysContact from agent using snmpget
       shell: snmpget -v2c -c public {{ hostvars['agent']['ansible_host'] }} SNMPv2-MIB::sysContact.0
@@ -176,10 +176,10 @@
         msg: "The sysLocation is: {{ sysLocation_result.stdout }}"
 
 - name: WALK tcpConnLocalPort and udpLocalPort
-  hosts: managers
+  hosts: manager
   become: false
   gather_facts: false # Skip gathering facts for this play
-  tags: snmp_walk_request # Tag this play
+  tags: "10"
   tasks:
     - name: Walk tcpConnLocalPort using snmpwalk
       shell: snmpwalk -v2c -c public {{ hostvars['agent']['ansible_host'] }} tcpConnLocalPort
@@ -198,10 +198,10 @@
         msg: "The udpLocalPort is: {{ udpLocalPort_result.stdout }}"
 
 - name: GET sysName
-  hosts: managers
+  hosts: manager
   become: false
   gather_facts: false # Skip gathering facts for this play
-  tags: sw_center # Tag this play
+  tags: "11"
   tasks:
     - name: Get sysName from sw_center using snmpget
       command: snmpget -v2c -c public {{ hostvars['sw_center']['ansible_host'] }} SNMPv2-MIB::sysName.0
@@ -218,3 +218,163 @@
     - name: Display sysDescr
       debug:
         msg: "The sysDescr is: {{ sysDescr_result.stdout }}"
+
+- name: Configure SNMPv3 user
+  hosts: agent
+  become: true
+  gather_facts: false
+  tags: "12"
+  tasks:
+    - name: Stop SNMP daemon
+      systemd:
+        name: snmpd
+        state: stopped
+
+    - name: Create SNMPv3 user
+      command: net-snmp-create-v3-user -A 5Eptember! -X 5Eptember! -a MD5 -x DES snmpv3user
+
+    - name: Configure SNMPD
+      blockinfile:
+        path: /etc/snmp/snmpd.conf
+        block: |
+          rwuser snmpv3user
+
+    - name: Start SNMP daemon
+      systemd:
+        name: snmpd
+        state: started
+
+- name: Verify SNMPv3 user from manager
+  hosts: manager
+  become: false
+  gather_facts: false
+  tags: "13"
+  tasks:
+    - name: Verify SNMPv3 user
+      command: snmpwalk -v3 -u snmpv3user -l authPriv -a MD5 -A 5Eptember! -x DES -X 5Eptember! {{ hostvars['agent']['ansible_host'] }} sysName
+      register: snmpwalk_output
+
+    - name: Display SNMPv3 user verification
+      debug:
+        msg: "{{ snmpwalk_output.stdout }}"
+
+- name: Configure SNMP settings for user
+  hosts: manager
+  become: true
+  gather_facts: false
+  tags: "14"
+  tasks:
+    - name: Display the user running the playbook
+      debug:
+        msg: "The playbook is being run by user: {{ ansible_user }}"
+
+    - name: Ensure the .snmp directory exists
+      file:
+        path: /home/netadm03/.snmp
+        state: directory
+        mode: "0700" # Set permissions for the directory
+
+    - name: Ensure the SNMP configuration file exists
+      file:
+        path: /home/netadm03/.snmp/snmp.conf
+        state: touch # This will create the file if it doesn't exist
+        mode: "0700" # Set permissions for the directory
+
+    - name: Add SNMP configuration to snmp.conf
+      blockinfile:
+        path: /home/netadm03/.snmp/snmp.conf
+        block: |
+          defSecurityName snmpv3user
+          defVersion 3
+          defAuthType MD5
+          defPrivType DES
+          defAuthPassphrase 5Eptember!
+          defPrivPassphrase 5Eptember!
+          defSecurityLevel authPriv
+
+    - name: Verify SNMPv3 user
+      command: snmpset {{ hostvars['agent']['ansible_host'] }} sysName.0 s "sysName set by Ansible"
+      register: snmpwalk_output
+
+    - name: Display SNMPv3 user verification
+      debug:
+        msg: "{{ snmpwalk_output.stdout }}"
+
+- name: Install packages agent
+  hosts: agent
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: "15"
+  tasks:
+    - name: Install packages
+      apt:
+        name:
+          - snmp
+          - snmp-mibs-downloader
+          - snmptrapd
+        state: present
+
+    - name: Comment out 'mibs :' in snmp.conf
+      lineinfile:
+        path: /etc/snmp/snmp.conf
+        regexp: "^mibs :"
+        line: "#mibs :"
+        state: present
+        insertafter: "^# loading them" # Change this to the line you want to insert after
+
+- name: Install packages manager
+  hosts: manager
+  become: true
+  gather_facts: false # Skip gathering facts for this play
+  tags: "16"
+  tasks:
+    - name: Install packages
+      apt:
+        name:
+          - snmptrapd
+        state: present
+
+    - name: Stop snmptrapd daemon
+      systemd:
+        name: snmptrapd
+        state: stopped
+
+    - name: insert block in file
+      blockinfile:
+        path: /etc/snmp/snmptrapd.conf
+        block: |
+          createUser  snmpv3user MD5 "5Eptember!" DES "5Eptember!"
+          authUser log,execute,net snmpv3user authPriv
+          [snmp] logOption s u
+
+    - name: insert lines in file
+      blockinfile:
+        path: /etc/default/snmptrapd
+        block: |
+          TRAPDRUN=yes
+
+    - name: Start snmptrapd and snmp daemon
+      command: systemctl start snmptrapd snmpd
+
+- name: send inform
+  hosts: agent
+  become: true
+  gather_facts: false
+  tags: "17"
+  tasks:
+    - name: Send inform
+      shell: snmpinform -v 3 -u snmpv3user -a MD5 -A 5Eptember! -x DES -X 5Eptember! -l authPriv {{ hostvars['manager']['ansible_host'] }} 42 coldStart.0
+
+- name: view inform
+  hosts: manager
+  become: false
+  gather_facts: false
+  tags: "18"
+  tasks:
+    - name: View inform
+      command: journalctl -u snmptrapd -n 1
+      register: view_inform
+
+    - name: Display inform
+      debug:
+        msg: "{{ view_inform.stdout }}"
