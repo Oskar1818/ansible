@@ -1,6 +1,6 @@
 ---
 - name: Setup
-  hosts: all
+  hosts: manager, agent
   become: true
   gather_facts: false # Skip gathering facts for this play
   tags: "1"
@@ -57,13 +57,9 @@
           - libsnmp-dev
         state: present
 
-    - name: Comment out 'mibs :' in snmp.conf
-      lineinfile:
-        path: /etc/snmp/snmp.conf
-        regexp: "^mibs :"
-        line: "#mibs :"
-        state: present
-        insertafter: "^# loading them" # Change this to the line you want to insert after
+    - name: Comment out 'mibs :' in snmp.conf if not already commented
+      shell: sed -i '/^mibs :/ {/^[#]/! s/^/#/}' /etc/snmp/snmp.conf
+    #TODO
 
 - name: Install and configure agent
   hosts: agent
@@ -78,35 +74,22 @@
           - libsnmp-dev
         state: present
 
-    - name: edit agentaddress /etc/snmp/snmpd.conf
-      lineinfile:
-        path: /etc/snmp/snmpd.conf
-        regexp: "^agentaddress"
-        line: "agentaddress udp:161"
+    - name: Edit agentaddress in /etc/snmp/snmpd.conf
+      shell: sed -i '/^agentaddress/c\agentaddress udp:161' /etc/snmp/snmpd.conf
+    #TODO
 
-    - name: edit communities /etc/snmp/snmpd.conf
-      blockinfile:
-        path: /etc/snmp/snmpd.conf
-        insertafter: "^#   arguments:"
-        block: |
-          rocommunity public 172.20.0.0/24
-          rocommunity public localhost
-          rwcommunity private 172.20.0.0/24
-          rwcommunity private localhost
-
-    - name: uncomment sysContact /etc/snmp/snmpd.conf
-      lineinfile:
-        path: /etc/snmp/snmpd.conf
-        regexp: "^sysContact"
-        line: "#sysContact"
-        state: absent
-
-    - name: uncomment sysLocation /etc/snmp/snmpd.conf
-      lineinfile:
-        path: /etc/snmp/snmpd.conf
-        regexp: "^sysLocation"
-        line: "#sysLocation"
-        state: absent
+    - name: Insert communities in /etc/snmp/snmpd.conf
+      shell: |
+        sed -i '/^#   arguments:  c/a\
+        rocommunity public 172.20.0.0/24\
+        rocommunity public localhost\
+        rwcommunity private 172.20.0.0/24\
+        rwcommunity private localhost\
+        ' /etc/snmp/snmpd.conf
+    #TODO
+    - name: Comment out sysLocation and sysContact in /etc/snmp/snmpd.conf
+      shell: sed -i '/^sysLocation\|^sysContact/s/^/#/' /etc/snmp/snmpd.conf
+    #TODO
 
     - name: Restart snmpd service
       systemd:
@@ -233,12 +216,9 @@
     - name: Create SNMPv3 user
       command: net-snmp-create-v3-user -A 5Eptember! -X 5Eptember! -a MD5 -x DES snmpv3user
 
-    - name: Configure SNMPD
-      blockinfile:
-        path: /etc/snmp/snmpd.conf
-        block: |
-          rwuser snmpv3user
-
+    - name: Configure SNMPD to add rwuser after rouser authPrivUser
+      shell: sed -i '/^rouser authPrivUser/a rwuser snmpv3user' /etc/snmp/snmpd.conf
+    #TODO
     - name: Start SNMP daemon
       systemd:
         name: snmpd
@@ -251,7 +231,7 @@
   tags: "13"
   tasks:
     - name: Verify SNMPv3 user
-      command: snmpwalk -v3 -u snmpv3user -l authPriv -a MD5 -A 5Eptember! -x DES -X 5Eptember! {{ hostvars['agent']['ansible_host'] }} sysName
+      command: snmpwalk -v3 -u snmpv3user -l authPriv -a MD5 -A 5Eptember! -x DES -X 5Eptember! 172.20.0.27 sysName
       register: snmpwalk_output
 
     - name: Display SNMPv3 user verification
@@ -268,32 +248,20 @@
       debug:
         msg: "The playbook is being run by user: {{ ansible_user }}"
 
-    - name: Ensure the .snmp directory exists
-      file:
-        path: /home/netadm03/.snmp
-        state: directory
-        mode: "0700" # Set permissions for the directory
-
-    - name: Ensure the SNMP configuration file exists
-      file:
-        path: /home/netadm03/.snmp/snmp.conf
-        state: touch # This will create the file if it doesn't exist
-        mode: "0700" # Set permissions for the directory
-
-    - name: Add SNMP configuration to snmp.conf
-      blockinfile:
-        path: /home/netadm03/.snmp/snmp.conf
-        block: |
-          defSecurityName snmpv3user
-          defVersion 3
-          defAuthType MD5
-          defPrivType DES
-          defAuthPassphrase 5Eptember!
-          defPrivPassphrase 5Eptember!
-          defSecurityLevel authPriv
-
+    - name: Create SNMP configuration file and insert settings
+      shell: |
+        mkdir -p ~/.snmp && \
+        echo "defSecurityName snmpv3user\n\
+        defVersion 3\n\
+        defAuthType MD5\n\
+        defPrivType DES\n\
+        defAuthPassphrase 5Eptember!\n\
+        defPrivPassphrase 5Eptember!\n\
+        defSecurityLevel authPriv" > ~/.snmp/snmp.conf
+    #TODO
     - name: Verify SNMPv3 user
       command: snmpset {{ hostvars['agent']['ansible_host'] }} sysName.0 s "sysName set by Ansible"
+      # snmpwalk -v3 -u snmpv3user -l authPriv -a MD5 -A 5Eptember! -x DES -X 5Eptember! {{ hostvars['agent']['ansible_host'] }} sysName
       register: snmpwalk_output
 
     - name: Display SNMPv3 user verification
@@ -314,13 +282,9 @@
           - snmptrapd
         state: present
 
-    - name: Comment out 'mibs :' in snmp.conf
-      lineinfile:
-        path: /etc/snmp/snmp.conf
-        regexp: "^mibs :"
-        line: "#mibs :"
-        state: present
-        insertafter: "^# loading them" # Change this to the line you want to insert after
+    - name: Comment out 'mibs :' in snmp.conf if not already commented
+      shell: sed -i '/^mibs :/ {/^[#]/! s/^/#/}' /etc/snmp/snmp.conf
+#TODO
 
 - name: Install packages manager
   hosts: manager
@@ -339,20 +303,18 @@
         name: snmptrapd
         state: stopped
 
-    - name: insert block in file
-      blockinfile:
-        path: /etc/snmp/snmptrapd.conf
-        block: |
-          createUser  snmpv3user MD5 "5Eptember!" DES "5Eptember!"
-          authUser log,execute,net snmpv3user authPriv
-          [snmp] logOption s u
-
-    - name: insert lines in file
-      blockinfile:
-        path: /etc/default/snmptrapd
-        block: |
-          TRAPDRUN=yes
-
+    - name: Insert communities in /etc/snmp/snmptrapd.conf
+      shell: |
+        sed -i '/^#traphandle ./a\
+        createUser snmpv3user MD5 "5Eptember!" DES "5Eptember!"\
+        authUser log,execute,net snmpv3user authPriv\
+        [snmp] logOption s u' /etc/snmp/snmptrapd.conf
+    #TODO "#traphandle ."
+    - name: Insert communities in /etc/default/snmptrapd
+      shell: |
+        sed -i '/^#traphandle ./a\
+        TRAPDRUN=yes' /etc/default/snmptrapd
+    #TODO #"TRAPDOPTS="
     - name: Start snmptrapd and snmp daemon
       command: systemctl start snmptrapd snmpd
 
